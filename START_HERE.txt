@@ -1,0 +1,27 @@
+AUCKLAND NATURAL HAZARD ASSET LOSS ENGINE
+=========================================
+
+WINDOWS QUICK START
+
+OFFLINE DASHBOARD - NO PYTHON, SERVER OR INTERNET REQUIRED
+
+Double-click scripts\windows\open_offline_dashboard.bat
+or open dashboard\index.html directly in Chrome or Edge.
+
+INTERACTIVE STREAMLIT DASHBOARD
+
+1. Extract the ZIP file to C:\Projects\auckland-asset-risk
+2. Install 64-bit Python 3.11 and select "Add python.exe to PATH"
+3. Double-click scripts\windows\setup.bat
+4. Double-click scripts\windows\run_dashboard.bat
+5. Open http://localhost:8501 if the browser does not open automatically
+
+FULL MODEL EXECUTION
+
+Double-click scripts\windows\run_pipeline.bat
+
+The first full run downloads Auckland Council public data. The supplied
+verified outputs allow the dashboard to start before rerunning the pipeline.
+
+Read LAPTOP_SETUP_GUIDE.md for the complete step-by-step process,
+troubleshooting, GitHub instructions and interview explanation.

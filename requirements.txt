@@ -1,0 +1,11 @@
+geopandas>=1.0
+matplotlib>=3.8
+numpy>=2.0
+pandas>=2.2
+plotly>=5.24
+pyarrow>=17.0
+pyogrio>=0.10
+PyYAML>=6.0
+requests>=2.32
+shapely>=2.0
+streamlit>=1.50

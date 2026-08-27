@@ -1,0 +1,18 @@
+{
+  "generated_at_utc": "2026-08-27T16:39:41.597566+00:00",
+  "record_count": 2022,
+  "missing_by_critical_field": {
+    "asset_id": 0,
+    "asset_type": 0,
+    "asset_group": 0,
+    "local_board": 0,
+    "geometry": 0
+  },
+  "duplicate_asset_id_records": 3,
+  "invalid_geometry_records": 0,
+  "empty_geometry_records": 0,
+  "unmapped_asset_types": [
+    "Unknown"
+  ],
+  "validation_note": "Records are retained and flagged. Public data is indicative and should be verified before operational or investment decisions."
+}

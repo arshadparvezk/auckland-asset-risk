@@ -1,0 +1,74 @@
+project:
+  title: "Auckland Natural Hazard Asset Loss Engine"
+  crs: "EPSG:2193"
+  random_seed: 20260824
+  monte_carlo_iterations: 10000
+  geometry_simplification_metres: 20
+
+data_sources:
+  assets:
+    name: "Auckland Council Park Asset Location"
+    service: "Park_Asset_Location"
+    layer: 0
+  hazard_scenarios:
+    baseline:
+      label: "Current climate"
+      mitigation_factor: 1.0
+      layers:
+        "0.181": "Coastal_Inundation_181"
+        "0.049": "Coastal_Inundation_49_AEP"
+        "0.020": "Coastal_Inundation_2_AEP"
+        "0.010": "Coastal_Inundation_1_AEP"
+    slr_1m:
+      label: "+1 m sea-level rise"
+      mitigation_factor: 1.0
+      layers:
+        "0.181": "Coastal_Inundation_181_1m_sea_level_rise"
+        "0.049": "Coastal_Inundation_49_AEP_1m_sea_level_rise"
+        "0.020": "Coastal_Inundation_2_AEP_1m_sea_level_rise"
+        "0.010": "Coastal_Inundation_1_AEP_1m_sea_level_rise"
+    slr_1m_mitigated:
+      label: "+1 m SLR with resilience treatment"
+      source_scenario: "slr_1m"
+      mitigation_factor: 0.65
+
+damage_ratios:
+  # Conditional damage ratios are transparent demonstration assumptions because
+  # the public hazard polygons provide extent, not water depth at each asset.
+  "0.181": {mean: 0.12, concentration: 28}
+  "0.049": {mean: 0.25, concentration: 24}
+  "0.020": {mean: 0.40, concentration: 20}
+  "0.010": {mean: 0.55, concentration: 16}
+
+replacement_values_nzd:
+  # Illustrative portfolio values only; these are not Auckland Council financial data.
+  "Public Toilet": 450000
+  "Playground - Public Access": 300000
+  "Library": 15000000
+  "Changing Shed": 650000
+  "Fitness Station - Public Access": 150000
+  "Toilet/Changing": 800000
+  "Playspace - Public Access": 400000
+  "Playground - Exclusive Access": 300000
+  "Library Rural": 5000000
+  "Fitness -  Public Access": 150000
+  "Playground Location": 300000
+  "Half Court - Public Access": 250000
+  "Pump Track": 500000
+  "Dog Agility Course": 120000
+  "Playground": 300000
+  "Bump Track": 350000
+  "Half Courts - Public Access": 250000
+  "__default__": 300000
+
+criticality_scores:
+  "Library": 5
+  "Library Rural": 4
+  "Public Toilet": 3
+  "Toilet/Changing": 3
+  "Changing Shed": 2
+  "__default__": 2
+
+uncertainty:
+  replacement_value_lognormal_sigma: 0.20
+  systematic_damage_lognormal_sigma: 0.12

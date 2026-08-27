@@ -1,0 +1,4 @@
+scenario,expected_annual_loss_nzd,assets_with_modelled_loss,portfolio_value_nzd,p90_curve_eal_nzd
+baseline,788976.75,38,2139570000.0,954347.9806317467
+slr_1m,6458126.5,219,2139570000.0,10194553.085407417
+slr_1m_mitigated,4197782.225,219,2139570000.0,6605028.039566558

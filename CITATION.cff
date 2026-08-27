@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this portfolio model, please cite it as below."
+title: "Auckland Natural Hazard Asset Loss Engine"
+type: software
+authors:
+  - family-names: "Parvez"
+    given-names: "Arshad"
+version: 1.2.0
+date-released: 2026-08-26
+license: MIT

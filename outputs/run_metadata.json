@@ -1,0 +1,13 @@
+{
+  "completed_at_utc": "2026-08-27T16:43:35.050576+00:00",
+  "project_version": "1.2.0",
+  "random_seed": 20260824,
+  "monte_carlo_iterations": 10000,
+  "geometry_simplification_metres": 20.0,
+  "asset_count": 2022,
+  "scenarios": [
+    "baseline",
+    "slr_1m",
+    "slr_1m_mitigated"
+  ]
+}

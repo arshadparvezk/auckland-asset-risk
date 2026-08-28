@@ -184,7 +184,10 @@ summary["Scenario"] = summary["scenario"].map(SCENARIO_LABELS)
 
 with st.sidebar:
     st.markdown("## Analysis controls")
-    st.caption("Filter the decision portfolio without changing the underlying model outputs.")
+    st.caption(
+        "Leave dropdowns empty to include all options, then add selections "
+        "one by one to narrow the portfolio."
+    )
     scenario_options = list(SCENARIO_LABELS)
     scenario = st.selectbox(
         "Hazard scenario",
@@ -195,14 +198,26 @@ with st.sidebar:
     scenario_register = register.loc[register["scenario"] == scenario].copy()
 
     boards = sorted(scenario_register["local_board"].dropna().astype(str).unique())
-    selected_boards = st.multiselect("Local boards", boards, default=boards)
+    selected_boards = st.multiselect(
+        "Local boards",
+        boards,
+        placeholder="All local boards — select to filter",
+    )
 
     asset_types = sorted(scenario_register["asset_type"].dropna().astype(str).unique())
-    selected_asset_types = st.multiselect("Asset types", asset_types, default=asset_types)
+    selected_asset_types = st.multiselect(
+        "Asset types",
+        asset_types,
+        placeholder="All asset types — select to filter",
+    )
 
     risk_order = ["Very high", "High", "Moderate", "Low", "No modelled exposure"]
     available_risks = [band for band in risk_order if band in set(scenario_register["risk_band"])]
-    selected_risks = st.multiselect("Risk bands", available_risks, default=available_risks)
+    selected_risks = st.multiselect(
+        "Risk bands",
+        available_risks,
+        placeholder="All risk bands — select to filter",
+    )
 
     search_text = st.text_input("Search asset or site", placeholder="e.g. library, Onehunga")
     only_exposed = st.checkbox("Only assets with modelled loss", value=False)
@@ -213,11 +228,13 @@ with st.sidebar:
     st.write(f"Seed: `{metadata['random_seed']}`")
 
 
-view = scenario_register[
-    scenario_register["local_board"].astype(str).isin(selected_boards)
-    & scenario_register["asset_type"].astype(str).isin(selected_asset_types)
-    & scenario_register["risk_band"].astype(str).isin(selected_risks)
-].copy()
+view = scenario_register.copy()
+if selected_boards:
+    view = view.loc[view["local_board"].astype(str).isin(selected_boards)].copy()
+if selected_asset_types:
+    view = view.loc[view["asset_type"].astype(str).isin(selected_asset_types)].copy()
+if selected_risks:
+    view = view.loc[view["risk_band"].astype(str).isin(selected_risks)].copy()
 if only_exposed:
     view = view.loc[view["expected_annual_loss_nzd"] > 0].copy()
 if search_text.strip():

@@ -11,3 +11,5 @@ def test_dashboard_loads_verified_outputs_without_exceptions():
     assert len(dashboard.tabs) == 4
     assert len(dashboard.metric) >= 5
     assert len(dashboard.dataframe) == 1
+    assert len(dashboard.multiselect) == 3
+    assert all(widget.value == [] for widget in dashboard.multiselect)

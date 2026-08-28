@@ -8,4 +8,4 @@ pyogrio>=0.10
 PyYAML>=6.0
 requests>=2.32
 shapely>=2.0
-streamlit>=1.50
+streamlit>=1.62,<2

@@ -209,6 +209,34 @@ def load_or_download_hazard(
     return hazard.to_crs("EPSG:2193")
 
 
+def load_or_download_screening_layer(
+    source: dict,
+    raw_dir: Path,
+    *,
+    refresh: bool,
+    simplify_metres: float,
+) -> gpd.GeoDataFrame:
+    """Load a configured public polygon layer used for non-financial screening."""
+    service = str(source["service"])
+    layer = int(source.get("layer", 0))
+    path = raw_dir / f"{service}.json"
+    out_fields = ",".join(source.get("out_fields", ["*"]))
+    if refresh or not path.exists():
+        frame = download_feature_layer(
+            service,
+            path,
+            layer=layer,
+            out_fields=out_fields,
+            simplify_metres=simplify_metres,
+            use_esri_json=True,
+        )
+    else:
+        frame = geodataframe_from_esri(
+            json.loads(path.read_text(encoding="utf-8")), "EPSG:2193"
+        )
+    return frame.to_crs("EPSG:2193")
+
+
 def data_quality_report(assets: gpd.GeoDataFrame, known_types: set[str]) -> dict:
     """Return auditable data-quality checks without silently dropping records."""
     critical = ["asset_id", "asset_type", "asset_group", "local_board", "geometry"]

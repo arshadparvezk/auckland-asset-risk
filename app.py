@@ -11,6 +11,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from dashboard_logic import scoped_growth_context, scoped_intervention_summary
+
 
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
@@ -41,6 +43,13 @@ RISK_BADGE_COLORS = {
     "Very high": "red",
 }
 RISK_ORDER = ["Very high", "High", "Moderate", "Low", "No modelled exposure"]
+LIQUEFACTION_ORDER = ["Damage Possible", "Damage Unlikely", "Very Low", "Not mapped"]
+LIQUEFACTION_COLORS = {
+    "Damage Possible": "#B42318",
+    "Damage Unlikely": "#D97706",
+    "Very Low": "#23856D",
+    "Not mapped": "#94A3B8",
+}
 AEP_LABELS = {
     0.181: "18.1% AEP",
     0.049: "4.9% AEP",
@@ -123,6 +132,10 @@ def load_project_data(source_version: tuple[int, ...]) -> tuple[pd.DataFrame, ..
     register = pd.read_csv(OUTPUTS / "asset_risk_register.csv")
     curve = pd.read_csv(OUTPUTS / "loss_exceedance_curve.csv")
     summary = pd.read_csv(OUTPUTS / "scenario_summary.csv")
+    screening = pd.read_csv(OUTPUTS / "asset_hazard_screening.csv")
+    growth = pd.read_csv(OUTPUTS / "local_board_growth_context.csv")
+    economics = pd.read_csv(OUTPUTS / "intervention_economics.csv")
+    economics_summary = pd.read_csv(OUTPUTS / "intervention_portfolio_summary.csv")
     assets = gpd.read_parquet(ASSETS).to_crs(4326)
     coordinates = pd.DataFrame(
         {
@@ -133,7 +146,18 @@ def load_project_data(source_version: tuple[int, ...]) -> tuple[pd.DataFrame, ..
     )
     quality = json.loads((OUTPUTS / "data_quality_report.json").read_text(encoding="utf-8"))
     metadata = json.loads((OUTPUTS / "run_metadata.json").read_text(encoding="utf-8"))
-    return register, curve, summary, coordinates, quality, metadata
+    return (
+        register,
+        curve,
+        summary,
+        screening,
+        growth,
+        economics,
+        economics_summary,
+        coordinates,
+        quality,
+        metadata,
+    )
 
 
 @st.cache_data(show_spinner=False, max_entries=20)
@@ -171,6 +195,9 @@ def build_portfolio_brief(
     scenario: str,
     metadata: dict,
     filter_summary: str,
+    screening_view: pd.DataFrame,
+    growth_view: pd.DataFrame,
+    economics_metrics: dict,
 ) -> str:
     """Build an audit-friendly Markdown summary of the current selection."""
     totals = comparison.set_index("scenario")["expected_annual_loss_nzd"].to_dict()
@@ -180,6 +207,11 @@ def build_portfolio_brief(
     avoided_eal = max(untreated_eal - mitigated_eal, 0.0)
     selected_value = float(view["replacement_value_nzd"].sum())
     selected_exposed = int((view["expected_annual_loss_nzd"] > 0).sum())
+    liquefaction_review = int(screening_view["liquefaction_review_flag"].sum())
+    dual_review = int((screening_view["screening_flag_count"] == 2).sum())
+    growth_focus = int(
+        growth_view.get("growth_and_loss_focus", pd.Series(dtype=bool)).sum()
+    )
     top_assets = view.nlargest(10, "priority_score")
     completed_label = pd.to_datetime(metadata["completed_at_utc"]).strftime("%d %b %Y")
 
@@ -193,6 +225,12 @@ def build_portfolio_brief(
         f"- Illustrative replacement value: **{money(selected_value)}**",
         f"- Expected annual loss: **{money(current_eal)}**",
         f"- Modelled annual loss avoided by treatment: **{money(avoided_eal)}**",
+        f"- Liquefaction 'Damage Possible' assets: **{liquefaction_review:,}**",
+        f"- Dual coastal/liquefaction review assets: **{dual_review:,}**",
+        f"- Above-Auckland-growth areas with modelled loss: **{growth_focus:,}**",
+        f"- Central illustrative intervention BCR: **{economics_metrics['illustrative_bcr']:.2f}**"
+        if pd.notna(economics_metrics["illustrative_bcr"])
+        else "- Central illustrative intervention BCR: **not evaluated**",
         "",
         "## Highest-priority assets",
         "",
@@ -219,7 +257,7 @@ def build_portfolio_brief(
             f"- Monte Carlo iterations: {metadata['monte_carlo_iterations']:,}",
             f"- Random seed: {metadata['random_seed']}",
             "",
-            "> Portfolio-screening demonstration. Values and damage assumptions are illustrative and are not Auckland Council financial data.",
+            "> Portfolio-screening demonstration. Values, damage, treatment and cost assumptions are illustrative and are not Auckland Council financial or engineering data. Liquefaction and growth are separate context layers, not additions to EAL.",
         ]
     )
     return "\n".join(lines)
@@ -229,6 +267,10 @@ required_files = [
     OUTPUTS / "asset_risk_register.csv",
     OUTPUTS / "loss_exceedance_curve.csv",
     OUTPUTS / "scenario_summary.csv",
+    OUTPUTS / "asset_hazard_screening.csv",
+    OUTPUTS / "local_board_growth_context.csv",
+    OUTPUTS / "intervention_economics.csv",
+    OUTPUTS / "intervention_portfolio_summary.csv",
     OUTPUTS / "data_quality_report.json",
     OUTPUTS / "run_metadata.json",
     ASSETS,
@@ -241,8 +283,21 @@ if missing_files:
     st.stop()
 
 source_version = tuple(path.stat().st_mtime_ns for path in required_files)
-register, curve, summary, coordinates, quality, metadata = load_project_data(source_version)
+(
+    register,
+    curve,
+    summary,
+    screening,
+    growth_context,
+    intervention_economics,
+    intervention_summary,
+    coordinates,
+    quality,
+    metadata,
+) = load_project_data(source_version)
 register["record_id"] = register["record_id"].astype(str)
+screening["record_id"] = screening["record_id"].astype(str)
+intervention_economics["record_id"] = intervention_economics["record_id"].astype(str)
 curve["Scenario"] = curve["scenario"].map(SCENARIO_LABELS)
 summary["Scenario"] = summary["scenario"].map(SCENARIO_LABELS)
 
@@ -382,6 +437,14 @@ filter_status.caption(
 
 selected_ids = view["record_id"].drop_duplicates().tolist()
 comparison = scenario_scope(register, selected_ids)
+screening_view = screening.loc[screening["record_id"].isin(selected_ids)].copy()
+growth_view = scoped_growth_context(view, growth_context, scenario)
+_, central_economics_metrics = scoped_intervention_summary(
+    intervention_economics,
+    selected_ids,
+    cost_multiplier=1.0,
+    real_discount_rate=0.05,
+)
 eal_by_scenario = comparison.set_index("scenario")["expected_annual_loss_nzd"].to_dict()
 baseline_eal = float(eal_by_scenario.get("baseline", 0.0))
 slr_eal = float(eal_by_scenario.get("slr_1m", 0.0))
@@ -392,6 +455,9 @@ selected_exposed = int((view["expected_annual_loss_nzd"] > 0).sum())
 exposure_rate = selected_exposed / len(view) if len(view) else 0.0
 treatment_benefit = max(slr_eal - mitigated_eal, 0.0)
 treatment_rate = treatment_benefit / slr_eal if slr_eal else 0.0
+liquefaction_mapped = int(screening_view["liquefaction_mapped"].sum())
+liquefaction_review = int(screening_view["liquefaction_review_flag"].sum())
+dual_hazard_review = int((screening_view["screening_flag_count"] == 2).sum())
 
 positive_risk = view.loc[view["expected_annual_loss_nzd"] > 0].sort_values(
     "expected_annual_loss_nzd", ascending=False
@@ -433,8 +499,8 @@ with st.container(border=True):
         st.caption("ASSET FINANCIAL RISK · PORTFOLIO SCREENING")
         st.title("Auckland natural hazard risk intelligence")
         st.markdown(
-            "Decision-ready coastal-inundation exposure, uncertainty and financial-loss "
-            "prioritisation for public assets."
+            "Coastal financial risk, seismic vulnerability, growth context and transparent "
+            "intervention screening for public assets."
         )
         with st.container(horizontal=True, gap="xsmall"):
             st.badge("Geospatial analytics", icon=":material/map:", color="blue")
@@ -505,7 +571,7 @@ with st.container(border=True):
     signal_header, signal_scope = st.columns([2.3, 1], vertical_alignment="center")
     signal_header.markdown("#### Executive decision brief")
     signal_scope.caption("All signals use the same selected asset cohort across scenarios.")
-    signal_1, signal_2, signal_3 = st.columns(3)
+    signal_1, signal_2, signal_3, signal_4 = st.columns(4)
     with signal_1:
         st.markdown(":material/trending_up: **Sea-level-rise shift**")
         if baseline_eal:
@@ -535,11 +601,18 @@ with st.container(border=True):
             )
         else:
             st.markdown("No positive-loss assets remain for concentration analysis.")
+    with signal_4:
+        st.markdown(":material/public: **Multi-hazard screen**")
+        st.markdown(
+            f"**{liquefaction_review:,} assets** are in the Council 'Damage Possible' "
+            f"liquefaction category; **{dual_hazard_review:,}** also have +1 m coastal exposure."
+        )
 
 
-overview_tab, map_tab, register_tab, method_tab = st.tabs(
+overview_tab, resilience_tab, map_tab, register_tab, method_tab = st.tabs(
     [
         ":material/space_dashboard: Executive overview",
+        ":material/shield: Resilience lenses",
         ":material/map: Exposure map",
         ":material/format_list_numbered: Priority register",
         ":material/fact_check: Model & data quality",
@@ -806,104 +879,730 @@ with overview_tab:
             )
 
 
+with resilience_tab:
+    st.subheader("Resilience decision lenses")
+    st.caption(
+        "Keep distinct evidence types separate while testing how they change portfolio attention."
+    )
+    resilience_lens = st.segmented_control(
+        "Decision lens",
+        ["Multi-hazard screen", "Growth & demand", "Intervention economics"],
+        default="Multi-hazard screen",
+        required=True,
+        key="resilience_lens",
+        width="stretch",
+    )
+
+    if resilience_lens == "Multi-hazard screen":
+        st.markdown("#### Coastal and seismic screening")
+        st.caption(
+            "Coastal exposure is modelled financially. Liquefaction is a separate regional "
+            "vulnerability category and is never converted to EAL in this project."
+        )
+        mapped_share = liquefaction_mapped / len(screening_view) if len(screening_view) else 0.0
+        with st.container(horizontal=True):
+            st.metric(
+                "Liquefaction coverage",
+                f"{liquefaction_mapped:,} · {mapped_share:.1%}",
+                border=True,
+                help="Assets intersecting a mapped Auckland Council liquefaction category.",
+            )
+            st.metric(
+                "Damage Possible",
+                f"{liquefaction_review:,}",
+                border=True,
+                help="A screening flag for further geotechnical review, not a damage forecast.",
+            )
+            st.metric(
+                "Coastal +1 m exposure",
+                f"{int(screening_view['coastal_slr_1m_exposed'].sum()):,}",
+                border=True,
+            )
+            st.metric(
+                "Dual-hazard review",
+                f"{dual_hazard_review:,}",
+                border=True,
+                help="Assets with +1 m coastal modelled loss and Damage Possible liquefaction.",
+            )
+
+        hazard_left, hazard_right = st.columns([1.05, 0.95])
+        with hazard_left:
+            with st.container(border=True, height="stretch"):
+                st.markdown("#### Liquefaction vulnerability profile")
+                category_summary = (
+                    screening_view.groupby("liquefaction_vulnerability", as_index=False)
+                    .agg(
+                        assets=("record_id", "nunique"),
+                        illustrative_value_nzd=("replacement_value_nzd", "sum"),
+                    )
+                )
+                category_summary["liquefaction_vulnerability"] = pd.Categorical(
+                    category_summary["liquefaction_vulnerability"],
+                    categories=LIQUEFACTION_ORDER,
+                    ordered=True,
+                )
+                category_summary = category_summary.sort_values(
+                    "liquefaction_vulnerability", ascending=False
+                )
+                if category_summary.empty:
+                    st.info("No assets remain under the current filters.")
+                else:
+                    liquefaction_fig = px.bar(
+                        category_summary,
+                        x="assets",
+                        y="liquefaction_vulnerability",
+                        orientation="h",
+                        color="liquefaction_vulnerability",
+                        color_discrete_map=LIQUEFACTION_COLORS,
+                        text="assets",
+                        custom_data=["illustrative_value_nzd"],
+                        labels={
+                            "assets": "Assets",
+                            "liquefaction_vulnerability": "",
+                        },
+                    )
+                    liquefaction_fig.update_traces(
+                        textposition="outside",
+                        hovertemplate=(
+                            "%{y}<br>Assets: %{x:,}"
+                            "<br>Illustrative value: NZ$%{customdata[0]:,.0f}<extra></extra>"
+                        ),
+                    )
+                    liquefaction_fig.update_layout(showlegend=False)
+                    st.plotly_chart(
+                        style_figure(liquefaction_fig, height=350),
+                        width="stretch",
+                        config=CHART_CONFIG,
+                    )
+        with hazard_right:
+            with st.container(border=True, height="stretch"):
+                st.markdown("#### Screening attention")
+                attention_order = [
+                    "Dual-hazard review",
+                    "Liquefaction review only",
+                    "Coastal inundation only",
+                    "No elevated flag",
+                ]
+                attention = (
+                    screening_view["screening_attention"]
+                    .value_counts()
+                    .reindex(attention_order, fill_value=0)
+                    .rename_axis("Screening result")
+                    .reset_index(name="Assets")
+                )
+                st.dataframe(
+                    attention,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "Screening result": st.column_config.TextColumn(width="large"),
+                        "Assets": st.column_config.NumberColumn(format="%,d"),
+                    },
+                )
+                st.info(
+                    "A dual flag prioritises investigation only. A combined financial risk score "
+                    "would require an earthquake occurrence model and asset fragility functions.",
+                    icon=":material/science:",
+                )
+
+        screening_table = screening_view.loc[
+            screening_view["screening_flag_count"] > 0
+        ].sort_values(
+            ["screening_flag_count", "coastal_slr_1m_eal_nzd"],
+            ascending=[False, False],
+        )[
+            [
+                "record_id",
+                "description",
+                "asset_type",
+                "local_board",
+                "coastal_slr_1m_eal_nzd",
+                "liquefaction_vulnerability",
+                "screening_attention",
+            ]
+        ]
+        with st.expander("Review flagged assets", icon=":material/assignment_late:"):
+            st.dataframe(
+                screening_table,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "record_id": "Record ID",
+                    "description": "Asset",
+                    "asset_type": "Asset type",
+                    "local_board": "Local board",
+                    "coastal_slr_1m_eal_nzd": st.column_config.NumberColumn(
+                        "+1 m coastal EAL", format="NZ$ %,.0f"
+                    ),
+                    "liquefaction_vulnerability": "Liquefaction",
+                    "screening_attention": "Attention",
+                },
+            )
+            st.download_button(
+                "Download hazard screening",
+                data=dataframe_to_csv(screening_view),
+                file_name="asset_hazard_screening.csv",
+                mime="text/csv",
+                icon=":material/download:",
+                on_click="ignore",
+            )
+        st.caption(
+            "Source: Auckland Council Liquefaction Vulnerability – Basic Assessment. "
+            "City-wide desktop mapping is indicative, not property-specific, and does not account "
+            "for site improvements or foundation design."
+        )
+
+    elif resilience_lens == "Growth & demand":
+        st.markdown("#### Growth and service-demand context")
+        st.caption(
+            "Auckland Council AGS23v1.1 projections are joined at local-board scale. "
+            "They provide planning context and do not multiply hazard loss."
+        )
+        mapped_growth = growth_view.loc[growth_view["growth_data_mapped"]].copy()
+        population_2022 = float(mapped_growth["population_2022"].sum())
+        population_2052 = float(mapped_growth["population_2052"].sum())
+        represented_growth = (
+            population_2052 / population_2022 - 1 if population_2022 else 0.0
+        )
+        benchmark = (
+            float(mapped_growth["auckland_population_growth_rate"].iloc[0])
+            if not mapped_growth.empty
+            else 0.0
+        )
+        focus_boards = int(mapped_growth["growth_and_loss_focus"].sum())
+        with st.container(horizontal=True):
+            st.metric(
+                "Represented population · 2022",
+                f"{population_2022:,.0f}",
+                border=True,
+                help="Full population of mapped planning areas represented by the selected assets.",
+            )
+            st.metric(
+                "Represented population · 2052",
+                f"{population_2052:,.0f}",
+                delta=f"{represented_growth:+.1%}",
+                border=True,
+            )
+            st.metric("Auckland benchmark", f"{benchmark:.1%}", border=True)
+            st.metric(
+                "Growth + loss focus areas",
+                f"{focus_boards:,}",
+                border=True,
+                help="Mapped areas with positive selected-scenario EAL and above-regional population growth.",
+            )
+
+        if mapped_growth.empty:
+            st.info("No mapped growth areas remain under the current filters.")
+        else:
+            growth_fig = px.scatter(
+                mapped_growth,
+                x="population_growth_rate",
+                y="expected_annual_loss_nzd",
+                size="assets_in_view",
+                color="growth_and_loss_focus",
+                color_discrete_map={True: "#B42318", False: "#0F766E"},
+                hover_name="planning_area",
+                hover_data={
+                    "assets_in_view": ":,",
+                    "population_2022": ":,.0f",
+                    "population_2052": ":,.0f",
+                    "households_growth_rate": ":.1%",
+                    "employment_growth_rate": ":.1%",
+                    "growth_and_loss_focus": False,
+                },
+                labels={
+                    "population_growth_rate": "Projected population growth · 2022–2052",
+                    "expected_annual_loss_nzd": "Selected-scenario EAL (NZD)",
+                    "assets_in_view": "Assets in view",
+                },
+                size_max=38,
+            )
+            growth_fig.add_vline(
+                x=benchmark,
+                line_dash="dash",
+                line_color="#D97706",
+                annotation_text="Auckland benchmark",
+                annotation_position="top right",
+            )
+            growth_fig.update_xaxes(tickformat=".0%")
+            growth_fig.update_yaxes(tickprefix="NZ$", tickformat="~s")
+            growth_fig.update_layout(showlegend=False)
+            st.plotly_chart(
+                style_figure(growth_fig, height=480),
+                width="stretch",
+                config=CHART_CONFIG,
+            )
+
+        growth_table = growth_view[
+            [
+                "planning_area",
+                "assets_in_view",
+                "assets_with_modelled_loss",
+                "expected_annual_loss_nzd",
+                "population_2022",
+                "population_2052",
+                "population_growth_rate",
+                "households_growth_rate",
+                "employment_growth_rate",
+                "growth_and_loss_focus",
+            ]
+        ]
+        st.dataframe(
+            growth_table,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "planning_area": st.column_config.TextColumn("Planning area", pinned=True),
+                "assets_in_view": st.column_config.NumberColumn("Assets", format="%,d"),
+                "assets_with_modelled_loss": st.column_config.NumberColumn(
+                    "Loss assets", format="%,d"
+                ),
+                "expected_annual_loss_nzd": st.column_config.NumberColumn(
+                    "Expected annual loss", format="NZ$ %,.0f"
+                ),
+                "population_2022": st.column_config.NumberColumn("Population 2022", format="%,.0f"),
+                "population_2052": st.column_config.NumberColumn("Population 2052", format="%,.0f"),
+                "population_growth_rate": st.column_config.NumberColumn(
+                    "Population growth", format="percent"
+                ),
+                "households_growth_rate": st.column_config.NumberColumn(
+                    "Household growth", format="percent"
+                ),
+                "employment_growth_rate": st.column_config.NumberColumn(
+                    "Employment growth", format="percent"
+                ),
+                "growth_and_loss_focus": st.column_config.CheckboxColumn("Focus"),
+            },
+        )
+        st.download_button(
+            "Download growth context",
+            data=dataframe_to_csv(growth_table),
+            file_name=f"growth_and_resilience_{scenario}.csv",
+            mime="text/csv",
+            icon=":material/download:",
+            on_click="ignore",
+        )
+        st.caption(
+            "Source: Auckland Council Auckland Growth Scenario 2023 v1.1. Waiheke and "
+            "Aotea/Great Barrier share one published source geography. Projections are scenarios, "
+            "not forecasts guaranteed to occur."
+        )
+
+    else:
+        st.markdown("#### Illustrative intervention economics")
+        st.caption(
+            "Conditional lifecycle appraisal under the static +1 m SLR stress case. "
+            "Change the two assumptions to see how sensitive the result is."
+        )
+        economics_controls = st.columns(2)
+        with economics_controls[0]:
+            cost_case = st.segmented_control(
+                "Generic treatment cost",
+                ["0.5× cost", "1.0× cost", "2.0× cost"],
+                default="1.0× cost",
+                required=True,
+                key="economics_cost_case",
+                width="stretch",
+            )
+        with economics_controls[1]:
+            discount_rate = st.segmented_control(
+                "Real discount rate",
+                [0.03, 0.05, 0.07],
+                default=0.05,
+                format_func=lambda value: f"{value:.0%}",
+                required=True,
+                key="economics_discount_rate",
+                width="stretch",
+            )
+        cost_multiplier = {"0.5× cost": 0.5, "1.0× cost": 1.0, "2.0× cost": 2.0}[
+            cost_case
+        ]
+        economics_view, economics_metrics = scoped_intervention_summary(
+            intervention_economics,
+            selected_ids,
+            cost_multiplier=cost_multiplier,
+            real_discount_rate=float(discount_rate),
+        )
+        bcr_value = economics_metrics["illustrative_bcr"]
+        bcr_label = f"{bcr_value:.2f}" if pd.notna(bcr_value) else "—"
+        with st.container(horizontal=True):
+            st.metric(
+                "Candidate assets",
+                f"{economics_metrics['candidate_assets']:,}",
+                border=True,
+                help="Assets with positive modelled annual loss reduction under treatment.",
+            )
+            st.metric(
+                "PV avoided loss",
+                money(economics_metrics["pv_avoided_loss_nzd"]),
+                border=True,
+            )
+            st.metric(
+                "PV lifecycle cost",
+                money(economics_metrics["pv_lifecycle_cost_nzd"]),
+                border=True,
+            )
+            st.metric(
+                "Illustrative NPV",
+                money(economics_metrics["illustrative_npv_nzd"]),
+                border=True,
+            )
+            st.metric("Illustrative BCR", bcr_label, border=True)
+            st.metric(
+                "Discounted payback",
+                economics_metrics["payback_status"],
+                border=True,
+            )
+
+        if economics_view.empty:
+            st.info("No intervention candidates remain under the current filters.")
+        else:
+            econ_left, econ_right = st.columns([1.05, 0.95])
+            with econ_left:
+                with st.container(border=True, height="stretch"):
+                    st.markdown("#### Benefit versus lifecycle cost")
+                    economics_fig = px.scatter(
+                        economics_view,
+                        x="pv_lifecycle_cost_nzd",
+                        y="pv_avoided_loss_nzd",
+                        size="avoided_annual_loss_nzd",
+                        color="illustrative_npv_nzd",
+                        color_continuous_scale=["#B42318", "#F8FAFC", "#0F766E"],
+                        color_continuous_midpoint=0,
+                        hover_name="description",
+                        hover_data={
+                            "asset_type": True,
+                            "local_board": True,
+                            "illustrative_bcr": ":.2f",
+                            "illustrative_npv_nzd": ":,.0f",
+                            "avoided_annual_loss_nzd": ":,.0f",
+                        },
+                        labels={
+                            "pv_lifecycle_cost_nzd": "PV lifecycle cost (NZD)",
+                            "pv_avoided_loss_nzd": "PV avoided loss (NZD)",
+                            "illustrative_npv_nzd": "Illustrative NPV",
+                        },
+                        size_max=28,
+                    )
+                    chart_max = float(
+                        max(
+                            economics_view["pv_lifecycle_cost_nzd"].max(),
+                            economics_view["pv_avoided_loss_nzd"].max(),
+                        )
+                    )
+                    economics_fig.add_shape(
+                        type="line",
+                        x0=0,
+                        y0=0,
+                        x1=chart_max,
+                        y1=chart_max,
+                        line=dict(color="#64748B", dash="dash"),
+                    )
+                    economics_fig.update_xaxes(tickprefix="NZ$", tickformat="~s")
+                    economics_fig.update_yaxes(tickprefix="NZ$", tickformat="~s")
+                    st.plotly_chart(
+                        style_figure(economics_fig, height=430),
+                        width="stretch",
+                        config=CHART_CONFIG,
+                    )
+            with econ_right:
+                with st.container(border=True, height="stretch"):
+                    st.markdown("#### Cost sensitivity")
+                    sensitivity_rows = []
+                    for label, multiplier in (
+                        ("0.5×", 0.5),
+                        ("1.0×", 1.0),
+                        ("2.0×", 2.0),
+                    ):
+                        _, metrics = scoped_intervention_summary(
+                            intervention_economics,
+                            selected_ids,
+                            cost_multiplier=multiplier,
+                            real_discount_rate=float(discount_rate),
+                        )
+                        sensitivity_rows.append(
+                            {
+                                "Cost case": label,
+                                "Illustrative NPV": metrics["illustrative_npv_nzd"],
+                                "Illustrative BCR": metrics["illustrative_bcr"],
+                            }
+                        )
+                    sensitivity = pd.DataFrame(sensitivity_rows)
+                    sensitivity["Outcome"] = sensitivity["Illustrative NPV"].map(
+                        lambda value: "Positive" if value >= 0 else "Negative"
+                    )
+                    sensitivity_fig = px.bar(
+                        sensitivity,
+                        x="Cost case",
+                        y="Illustrative NPV",
+                        color="Outcome",
+                        color_discrete_map={"Positive": "#0F766E", "Negative": "#B42318"},
+                        text=sensitivity["Illustrative NPV"].map(money),
+                        custom_data=["Illustrative BCR"],
+                    )
+                    sensitivity_fig.update_traces(
+                        textposition="outside",
+                        hovertemplate=(
+                            "%{x} cost<br>NPV: NZ$%{y:,.0f}"
+                            "<br>BCR: %{customdata[0]:.2f}<extra></extra>"
+                        ),
+                    )
+                    sensitivity_fig.update_yaxes(tickprefix="NZ$", tickformat="~s")
+                    sensitivity_fig.update_layout(showlegend=False)
+                    st.plotly_chart(
+                        style_figure(sensitivity_fig, height=350),
+                        width="stretch",
+                        config=CHART_CONFIG,
+                    )
+                    st.caption(
+                        f"{economics_metrics['positive_npv_assets']:,} of "
+                        f"{economics_metrics['candidate_assets']:,} candidates have positive "
+                        "illustrative NPV under the selected assumptions."
+                    )
+
+            economics_table = economics_view[
+                [
+                    "record_id",
+                    "description",
+                    "asset_type",
+                    "local_board",
+                    "avoided_annual_loss_nzd",
+                    "capital_cost_nzd",
+                    "pv_lifecycle_cost_nzd",
+                    "illustrative_npv_nzd",
+                    "illustrative_bcr",
+                    "break_even_capex_nzd",
+                ]
+            ].sort_values("illustrative_npv_nzd", ascending=False)
+            st.dataframe(
+                economics_table,
+                width="stretch",
+                hide_index=True,
+                height=430,
+                column_config={
+                    "record_id": "Record ID",
+                    "description": st.column_config.TextColumn("Asset", pinned=True),
+                    "asset_type": "Asset type",
+                    "local_board": "Local board",
+                    "avoided_annual_loss_nzd": st.column_config.NumberColumn(
+                        "Annual avoided loss", format="NZ$ %,.0f"
+                    ),
+                    "capital_cost_nzd": st.column_config.NumberColumn(
+                        "Illustrative capex", format="NZ$ %,.0f"
+                    ),
+                    "pv_lifecycle_cost_nzd": st.column_config.NumberColumn(
+                        "PV lifecycle cost", format="NZ$ %,.0f"
+                    ),
+                    "illustrative_npv_nzd": st.column_config.NumberColumn(
+                        "Illustrative NPV", format="NZ$ %,.0f"
+                    ),
+                    "illustrative_bcr": st.column_config.NumberColumn("BCR", format="%.2f"),
+                    "break_even_capex_nzd": st.column_config.NumberColumn(
+                        "Break-even capex", format="NZ$ %,.0f"
+                    ),
+                },
+            )
+            st.download_button(
+                "Download intervention screen",
+                data=dataframe_to_csv(economics_table),
+                file_name="intervention_economics_selected.csv",
+                mime="text/csv",
+                icon=":material/download:",
+                on_click="ignore",
+            )
+        st.warning(
+            "Demonstration only: costs are 20% of illustrative replacement value with a "
+            "NZ$50,000 floor, plus 1% annual O&M. Benefits are direct modelled damage avoided. "
+            "The screen excludes service continuity, safety, equity, environmental, insurance, "
+            "programme and financing effects.",
+            icon=":material/calculate:",
+        )
+
+
 with map_tab:
     map_heading, map_control = st.columns([2.4, 1], vertical_alignment="bottom")
     with map_heading:
         st.subheader("Asset-level exposure map")
-        st.caption("Colour shows risk band; marker size can show financial loss or priority.")
+        st.caption("Switch between monetised coastal risk and non-financial seismic screening.")
     with map_control:
+        map_lens = st.segmented_control(
+            "Map lens",
+            ["Coastal financial loss", "Liquefaction vulnerability"],
+            default="Coastal financial loss",
+            required=True,
+            key="map_lens",
+            width="stretch",
+        )
+
+    if map_lens == "Coastal financial loss":
         map_metric = st.segmented_control(
             "Size markers by",
             ["Expected annual loss", "Priority score"],
             default="Expected annual loss",
             required=True,
             key="map_metric",
-            width="stretch",
         )
-
-    mapped = view.merge(coordinates, on="record_id", how="left")
-    mapped = mapped.loc[
-        (mapped["expected_annual_loss_nzd"] > 0)
-        & mapped["latitude"].notna()
-        & mapped["longitude"].notna()
-    ].copy()
-    with st.container(horizontal=True):
-        st.metric("Mapped exposed assets", f"{len(mapped):,}", border=True)
-        st.metric(
-            "Local boards represented",
-            f"{mapped['local_board'].nunique():,}" if not mapped.empty else "0",
-            border=True,
-        )
-        st.metric(
-            "Mapped expected annual loss",
-            money(float(mapped["expected_annual_loss_nzd"].sum())),
-            border=True,
-        )
-
-    if mapped.empty:
-        st.info(
-            "No mapped exposed assets remain. Adjust the sidebar filters.",
-            icon=":material/map:",
-        )
+        mapped = view.merge(coordinates, on="record_id", how="left")
+        mapped = mapped.loc[
+            (mapped["expected_annual_loss_nzd"] > 0)
+            & mapped["latitude"].notna()
+            & mapped["longitude"].notna()
+        ].copy()
+        with st.container(horizontal=True):
+            st.metric("Mapped exposed assets", f"{len(mapped):,}", border=True)
+            st.metric(
+                "Local boards represented",
+                f"{mapped['local_board'].nunique():,}" if not mapped.empty else "0",
+                border=True,
+            )
+            st.metric(
+                "Mapped expected annual loss",
+                money(float(mapped["expected_annual_loss_nzd"].sum())),
+                border=True,
+            )
+        if mapped.empty:
+            st.info(
+                "No mapped exposed assets remain. Adjust the sidebar filters.",
+                icon=":material/map:",
+            )
+        else:
+            size_column = (
+                "expected_annual_loss_nzd"
+                if map_metric == "Expected annual loss"
+                else "priority_score"
+            )
+            map_fig = px.scatter_map(
+                mapped,
+                lat="latitude",
+                lon="longitude",
+                color="risk_band",
+                color_discrete_map=RISK_COLORS,
+                category_orders={"risk_band": RISK_ORDER},
+                size=size_column,
+                size_max=28,
+                hover_name="asset_name",
+                hover_data={
+                    "asset_type": True,
+                    "local_board": True,
+                    "expected_annual_loss_nzd": ":,.0f",
+                    "priority_score": ":,.0f",
+                    "latitude": False,
+                    "longitude": False,
+                },
+                labels={
+                    "asset_type": "Asset type",
+                    "local_board": "Local board",
+                    "expected_annual_loss_nzd": "Expected annual loss (NZD)",
+                    "priority_score": "Priority score",
+                    "risk_band": "Risk band",
+                },
+                map_style="carto-positron",
+                center={"lat": -36.85, "lon": 174.76},
+                zoom=8,
+                height=650,
+            )
+            map_export_columns = [
+                "record_id",
+                "scenario",
+                "asset_name",
+                "asset_type",
+                "local_board",
+                "risk_band",
+                "expected_annual_loss_nzd",
+                "priority_score",
+                "latitude",
+                "longitude",
+            ]
+            map_file_name = f"mapped_asset_exposure_{scenario}.csv"
     else:
-        size_column = (
-            "expected_annual_loss_nzd"
-            if map_metric == "Expected annual loss"
-            else "priority_score"
+        screening_fields = [
+            "record_id",
+            "liquefaction_vulnerability",
+            "liquefaction_mapped",
+            "liquefaction_review_flag",
+            "screening_attention",
+            "coastal_slr_1m_exposed",
+        ]
+        mapped = (
+            view.merge(screening[screening_fields], on="record_id", how="left")
+            .merge(coordinates, on="record_id", how="left")
         )
-        map_fig = px.scatter_map(
-            mapped,
-            lat="latitude",
-            lon="longitude",
-            color="risk_band",
-            color_discrete_map=RISK_COLORS,
-            category_orders={"risk_band": RISK_ORDER},
-            size=size_column,
-            size_max=28,
-            hover_name="asset_name",
-            hover_data={
-                "asset_type": True,
-                "local_board": True,
-                "expected_annual_loss_nzd": ":,.0f",
-                "priority_score": ":,.0f",
-                "latitude": False,
-                "longitude": False,
-            },
-            labels={
-                "asset_type": "Asset type",
-                "local_board": "Local board",
-                "expected_annual_loss_nzd": "Expected annual loss (NZD)",
-                "priority_score": "Priority score",
-                "risk_band": "Risk band",
-            },
-            map_style="carto-positron",
-            center={"lat": -36.85, "lon": 174.76},
-            zoom=8,
-            height=650,
-        )
+        mapped = mapped.loc[
+            mapped["latitude"].notna() & mapped["longitude"].notna()
+        ].copy()
+        with st.container(horizontal=True):
+            st.metric("Mapped portfolio assets", f"{len(mapped):,}", border=True)
+            st.metric(
+                "Council category assigned",
+                f"{int(mapped['liquefaction_mapped'].sum()):,}",
+                border=True,
+            )
+            st.metric(
+                "Damage Possible",
+                f"{int(mapped['liquefaction_review_flag'].sum()):,}",
+                border=True,
+            )
+            st.metric(
+                "Dual-hazard review",
+                f"{int(((mapped['liquefaction_review_flag']) & (mapped['coastal_slr_1m_exposed'])).sum()):,}",
+                border=True,
+            )
+        if mapped.empty:
+            st.info("No mapped assets remain. Adjust the sidebar filters.", icon=":material/map:")
+        else:
+            map_fig = px.scatter_map(
+                mapped,
+                lat="latitude",
+                lon="longitude",
+                color="liquefaction_vulnerability",
+                color_discrete_map=LIQUEFACTION_COLORS,
+                category_orders={"liquefaction_vulnerability": LIQUEFACTION_ORDER},
+                hover_name="asset_name",
+                hover_data={
+                    "asset_type": True,
+                    "local_board": True,
+                    "screening_attention": True,
+                    "expected_annual_loss_nzd": ":,.0f",
+                    "latitude": False,
+                    "longitude": False,
+                },
+                labels={
+                    "liquefaction_vulnerability": "Liquefaction vulnerability",
+                    "screening_attention": "Screening attention",
+                    "expected_annual_loss_nzd": "Selected-scenario coastal EAL (NZD)",
+                },
+                map_style="carto-positron",
+                center={"lat": -36.85, "lon": 174.76},
+                zoom=8,
+                height=650,
+            )
+            map_export_columns = [
+                "record_id",
+                "scenario",
+                "asset_name",
+                "asset_type",
+                "local_board",
+                "liquefaction_vulnerability",
+                "liquefaction_review_flag",
+                "screening_attention",
+                "coastal_slr_1m_exposed",
+                "expected_annual_loss_nzd",
+                "latitude",
+                "longitude",
+            ]
+            map_file_name = "mapped_liquefaction_screening.csv"
+
+    if not mapped.empty:
         map_fig.update_layout(
             margin=dict(l=0, r=0, t=8, b=0),
             legend=dict(orientation="h", y=1.02),
         )
         with st.container(border=True):
             st.plotly_chart(map_fig, width="stretch", config=CHART_CONFIG)
-
-        map_export_columns = [
-            "record_id",
-            "scenario",
-            "asset_name",
-            "asset_type",
-            "local_board",
-            "risk_band",
-            "expected_annual_loss_nzd",
-            "priority_score",
-            "latitude",
-            "longitude",
-        ]
         st.download_button(
-            "Download mapped exposure",
+            "Download mapped evidence",
             data=dataframe_to_csv(mapped[map_export_columns]),
-            file_name=f"mapped_asset_exposure_{scenario}.csv",
+            file_name=map_file_name,
             mime="text/csv",
             icon=":material/download:",
             on_click="ignore",
@@ -950,7 +1649,16 @@ with register_tab:
         "scenario_rank"
     ].astype(int).to_dict()
     scenario_tie_counts = scenario_register["priority_score"].value_counts().to_dict()
-    briefing = build_portfolio_brief(view, comparison, scenario, metadata, filter_summary)
+    briefing = build_portfolio_brief(
+        view,
+        comparison,
+        scenario,
+        metadata,
+        filter_summary,
+        screening_view,
+        growth_view,
+        central_economics_metrics,
+    )
     with st.container(horizontal=True, horizontal_alignment="right"):
         st.download_button(
             "Filtered register",
@@ -1193,9 +1901,10 @@ with method_tab:
             st.markdown(
                 """
                 - **Asset locations:** 2,022 processed Auckland Council public asset records
-                - **Hazard layers:** four AEP extents for current climate and +1 m sea-level rise
-                - **Model configuration:** replacement values, criticality, damage ratios and uncertainty
-                - **Treatment assumption:** 35% reduction in conditional damage under +1 m SLR
+                - **Coastal hazard:** four AEP extents for current climate and +1 m sea-level rise
+                - **Seismic screen:** Auckland Council basic liquefaction-vulnerability categories
+                - **Growth context:** Auckland Council AGS23v1.1 local-board projections, 2022–2052
+                - **Model assumptions:** values, criticality, damage, uncertainty, treatment and costs
                 """
             )
             st.caption("Primary configuration: config/model.yml")
@@ -1207,7 +1916,9 @@ with method_tab:
                 """
                 - **Asset risk register:** EAL, criticality-adjusted priority and risk band
                 - **Loss-exceedance curve:** expected, P50 and P90 event loss by AEP
-                - **Scenario summary:** portfolio EAL, exposed assets and illustrative value
+                - **Multi-hazard screen:** coastal exposure beside liquefaction vulnerability
+                - **Growth context:** local-board demand indicators beside portfolio evidence
+                - **Intervention screen:** PV benefits, costs, NPV, BCR, payback and sensitivity
                 - **Quality and run metadata:** validation results, seed, version and completion time
                 """
             )
@@ -1226,15 +1937,21 @@ with method_tab:
                 5. Propagate uncertainty through Monte Carlo simulation.
                 6. Integrate the loss-exceedance curve to estimate expected annual loss.
                 7. Rank assets using EAL adjusted by service criticality.
+                8. Assign Council liquefaction categories as a separate seismic screen.
+                9. Join AGS23v1.1 planning context without changing EAL.
+                10. Appraise the illustrative treatment under explicit lifecycle assumptions.
                 """
             )
-            formula_left, formula_right = st.columns(2)
+            formula_left, formula_middle, formula_right = st.columns(3)
             with formula_left:
                 st.markdown("**Expected conditional loss**")
                 st.latex(r"L_{i,e}=V_i \times DR_e \times M_s")
-            with formula_right:
+            with formula_middle:
                 st.markdown("**Criticality-adjusted priority**")
                 st.latex(r"Priority_i=EAL_i \times [1+0.15(C_i-1)]")
+            with formula_right:
+                st.markdown("**Illustrative net present value**")
+                st.latex(r"NPV_i=PV(Avoided\ EAL_i)-PV(Lifecycle\ Cost_i)")
 
     with quality_col:
         with st.container(border=True, height="stretch"):
@@ -1289,7 +2006,7 @@ with method_tab:
             st.caption(quality["validation_note"])
 
     with st.expander("Reproducibility record", icon=":material/history_edu:"):
-        reproducibility = st.columns(4)
+        reproducibility = st.columns(5)
         reproducibility[0].metric("Version", metadata["project_version"], border=True)
         reproducibility[1].metric(
             "Random seed", f"{metadata['random_seed']}", border=True
@@ -1300,16 +2017,22 @@ with method_tab:
             border=True,
         )
         reproducibility[3].metric("Completed", completed_at, border=True)
+        reproducibility[4].metric(
+            "Liquefaction coverage",
+            f"{metadata['liquefaction_mapped_assets'] / metadata['asset_count']:.1%}",
+            border=True,
+        )
 
     st.warning(
-        "Responsible-use limitation: hazard locations use public Auckland Council data. "
-        "Replacement values and damage ratios are illustrative assumptions, not Council financial data. "
-        "Use these results for portfolio-screening demonstration only—not engineering, insurance, "
+        "Responsible-use limitation: hazard locations and growth context use public Auckland Council "
+        "data. Replacement values, damage ratios, treatment effects and costs are illustrative—not "
+        "Council financial or engineering data. Liquefaction is regional screening and growth does not "
+        "multiply loss. Use these results for portfolio demonstration only, not engineering, insurance, "
         "valuation, regulatory or investment decisions.",
         icon=":material/gavel:",
     )
 
 st.caption(
-    "Auckland public asset portfolio screening · Public hazard and asset-location data · "
+    "Auckland public asset portfolio screening · Public hazard, asset and growth data · "
     f"Model v{metadata['project_version']}"
 )

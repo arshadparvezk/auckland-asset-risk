@@ -87,6 +87,11 @@ def write_database(
     asset_events: pd.DataFrame,
     register: pd.DataFrame,
     path: Path,
+    *,
+    hazard_screening: pd.DataFrame | None = None,
+    growth_context: pd.DataFrame | None = None,
+    intervention_economics: pd.DataFrame | None = None,
+    intervention_summary: pd.DataFrame | None = None,
 ) -> None:
     if path.exists():
         path.unlink()
@@ -97,6 +102,25 @@ def write_database(
         event_losses.to_sql("event_losses", connection, index=False, if_exists="replace")
         asset_events.to_sql("asset_event_exposure", connection, index=False, if_exists="replace")
         register.to_sql("asset_risk_register", connection, index=False, if_exists="replace")
+        if hazard_screening is not None:
+            hazard_screening.to_sql(
+                "asset_hazard_screening", connection, index=False, if_exists="replace"
+            )
+        if growth_context is not None:
+            growth_context.to_sql(
+                "local_board_growth_context", connection, index=False, if_exists="replace"
+            )
+        if intervention_economics is not None:
+            intervention_economics.to_sql(
+                "intervention_economics", connection, index=False, if_exists="replace"
+            )
+        if intervention_summary is not None:
+            intervention_summary.to_sql(
+                "intervention_portfolio_summary",
+                connection,
+                index=False,
+                if_exists="replace",
+            )
         connection.executescript(
             """
             CREATE INDEX idx_assets_asset_id ON assets(asset_id);
@@ -106,6 +130,21 @@ def write_database(
               ON asset_risk_register(scenario, priority_score DESC);
             """
         )
+        if hazard_screening is not None:
+            connection.execute(
+                "CREATE INDEX idx_screening_attention "
+                "ON asset_hazard_screening(screening_flag_count DESC)"
+            )
+        if growth_context is not None:
+            connection.execute(
+                "CREATE INDEX idx_growth_scenario_area "
+                "ON local_board_growth_context(scenario, planning_area)"
+            )
+        if intervention_economics is not None:
+            connection.execute(
+                "CREATE INDEX idx_intervention_npv "
+                "ON intervention_economics(illustrative_npv_nzd DESC)"
+            )
 
 
 def write_executive_summary(
@@ -114,6 +153,10 @@ def write_executive_summary(
     quality: dict,
     out_path: Path,
     iterations: int,
+    *,
+    hazard_screening: pd.DataFrame | None = None,
+    growth_context: pd.DataFrame | None = None,
+    intervention_summary: pd.DataFrame | None = None,
 ) -> None:
     scenario_eal = (
         register.groupby("scenario")["expected_annual_loss_nzd"].sum().to_dict()
@@ -122,6 +165,35 @@ def write_executive_summary(
     slr = float(scenario_eal.get("slr_1m", 0))
     mitigated = float(scenario_eal.get("slr_1m_mitigated", 0))
     avoided = max(0.0, slr - mitigated)
+    liquefaction_mapped = (
+        int(hazard_screening["liquefaction_mapped"].sum())
+        if hazard_screening is not None
+        else 0
+    )
+    liquefaction_review = (
+        int(hazard_screening["liquefaction_review_flag"].sum())
+        if hazard_screening is not None
+        else 0
+    )
+    growth_benchmark = 0.0
+    if growth_context is not None and not growth_context.empty:
+        growth_benchmark = float(
+            growth_context["auckland_population_growth_rate"].dropna().iloc[0]
+        )
+    central_economics = None
+    if intervention_summary is not None and not intervention_summary.empty:
+        central_rows = intervention_summary.loc[
+            (intervention_summary["cost_case"] == "central")
+            & (intervention_summary["real_discount_rate"].round(4) == 0.05)
+        ]
+        if not central_rows.empty:
+            central_economics = central_rows.iloc[0]
+    economics_sentence = (
+        "Under the central demonstration assumptions, the conditional intervention "
+        f"screen has a benefit-cost ratio of {float(central_economics['illustrative_bcr']):.2f}."
+        if central_economics is not None
+        else ""
+    )
     top = register.query("scenario == 'slr_1m'").head(10)
     table_rows = "".join(
         "<tr>"
@@ -140,23 +212,26 @@ def write_executive_summary(
 <title>Auckland Asset Risk Executive Summary</title>
 <style>
 body{{font-family:Arial,sans-serif;margin:0;background:#f5f7f8;color:#15242e}}main{{max-width:1080px;margin:auto;padding:38px}}
-h1{{color:{NAVY};margin-bottom:6px}}.sub{{color:#526772;margin-bottom:28px}}.cards{{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}}
+h1{{color:{NAVY};margin-bottom:6px}}.sub{{color:#526772;margin-bottom:28px}}.cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}}
 .card{{background:white;border-radius:10px;padding:20px;box-shadow:0 1px 5px #0001}}.value{{font-size:27px;font-weight:700;color:{NAVY}}}
 .label{{font-size:13px;color:#5b6b73;margin-top:6px}}section{{background:white;margin-top:22px;padding:24px;border-radius:10px}}
 table{{width:100%;border-collapse:collapse}}th,td{{text-align:left;padding:10px;border-bottom:1px solid #e5ecef;font-size:14px}}th{{color:{NAVY}}}
 .note{{border-left:4px solid {ORANGE};padding:12px;background:#fff7e6}}img{{width:100%;max-width:880px}}@media(max-width:760px){{.cards{{grid-template-columns:1fr 1fr}}}}
 </style></head><body><main>
-<h1>Auckland Natural Hazard Asset Loss Engine</h1><div class="sub">Decision prototype · coastal inundation · public park and community-facility assets</div>
+<h1>Auckland Natural Hazard Asset Risk Intelligence</h1><div class="sub">Coastal financial risk &middot; seismic screening &middot; growth and intervention context</div>
 <div class="cards">
 <div class="card"><div class="value">{quality['record_count']:,}</div><div class="label">assets assessed</div></div>
 <div class="card"><div class="value">{_money(baseline)}</div><div class="label">current-climate EAL</div></div>
 <div class="card"><div class="value">{_money(slr)}</div><div class="label">+1 m SLR EAL</div></div>
 <div class="card"><div class="value">{_money(avoided)}</div><div class="label">illustrative annual loss avoided by treatment</div></div>
+<div class="card"><div class="value">{liquefaction_review:,}</div><div class="label">liquefaction review flags ({liquefaction_mapped:,} mapped)</div></div>
+<div class="card"><div class="value">{growth_benchmark:.1%}</div><div class="label">Auckland population growth context, 2022&ndash;2052</div></div>
 </div>
 <section><h2>Loss-exceedance comparison</h2><img src="../figures/loss_exceedance_curve.png" alt="Loss exceedance curves"></section>
 <section><h2>Highest-priority assets under +1 m SLR</h2><table><thead><tr><th>Asset</th><th>Type</th><th>Local board</th><th>EAL</th><th>Risk band</th></tr></thead><tbody>{table_rows}</tbody></table></section>
-<section><h2>Interpretation</h2><p>The model joins public asset points to four coastal-inundation frequencies, converts exposure to financial loss using explicit vulnerability assumptions, and propagates replacement-value and damage uncertainty through {iterations:,} Monte Carlo iterations.</p>
-<p class="note"><strong>Important:</strong> Replacement values and damage functions are illustrative portfolio assumptions, not Auckland Council financial data. The output is a transparent analytical prototype, not an engineering, valuation, or investment decision.</p></section>
+<section><h2>Interpretation</h2><p>The model joins public asset points to four coastal-inundation frequencies, converts exposure to financial loss using explicit vulnerability assumptions, and propagates replacement-value and damage uncertainty through {iterations:,} Monte Carlo iterations. A separate Council liquefaction layer adds non-financial seismic screening, while AGS23v1.1 supplies planning context.</p>
+<p>{economics_sentence}</p>
+<p class="note"><strong>Important:</strong> Replacement values, damage functions, intervention costs and treatment effects are illustrative assumptions, not Auckland Council financial data or engineering estimates. Liquefaction is a regional vulnerability screen, not property-level earthquake risk. Growth does not multiply loss. This prototype is not an engineering, valuation, insurance, regulatory or investment decision.</p></section>
 </main></body></html>""",
         encoding="utf-8",
     )

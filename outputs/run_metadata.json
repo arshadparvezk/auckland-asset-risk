@@ -1,13 +1,23 @@
 {
-  "completed_at_utc": "2026-08-27T16:43:35.050576+00:00",
-  "project_version": "1.2.0",
+  "completed_at_utc": "2026-09-04T14:07:45.692970+00:00",
+  "project_version": "1.3.0",
   "random_seed": 20260824,
   "monte_carlo_iterations": 10000,
   "geometry_simplification_metres": 20.0,
+  "screening_geometry_simplification_metres": 0.0,
   "asset_count": 2022,
   "scenarios": [
     "baseline",
     "slr_1m",
     "slr_1m_mitigated"
-  ]
+  ],
+  "hazards_screened": [
+    "coastal_inundation",
+    "liquefaction_vulnerability"
+  ],
+  "liquefaction_mapped_assets": 1955,
+  "liquefaction_review_assets": 400,
+  "growth_context_source": "AGS23v1.1",
+  "growth_context_mapped_assets": 2015,
+  "intervention_assumption_set": "illustrative_generic_treatment_v1"
 }

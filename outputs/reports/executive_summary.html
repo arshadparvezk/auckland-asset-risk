@@ -3,21 +3,24 @@
 <title>Auckland Asset Risk Executive Summary</title>
 <style>
 body{font-family:Arial,sans-serif;margin:0;background:#f5f7f8;color:#15242e}main{max-width:1080px;margin:auto;padding:38px}
-h1{color:#003b5c;margin-bottom:6px}.sub{color:#526772;margin-bottom:28px}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+h1{color:#003b5c;margin-bottom:6px}.sub{color:#526772;margin-bottom:28px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 .card{background:white;border-radius:10px;padding:20px;box-shadow:0 1px 5px #0001}.value{font-size:27px;font-weight:700;color:#003b5c}
 .label{font-size:13px;color:#5b6b73;margin-top:6px}section{background:white;margin-top:22px;padding:24px;border-radius:10px}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #e5ecef;font-size:14px}th{color:#003b5c}
 .note{border-left:4px solid #f59e0b;padding:12px;background:#fff7e6}img{width:100%;max-width:880px}@media(max-width:760px){.cards{grid-template-columns:1fr 1fr}}
 </style></head><body><main>
-<h1>Auckland Natural Hazard Asset Loss Engine</h1><div class="sub">Decision prototype · coastal inundation · public park and community-facility assets</div>
+<h1>Auckland Natural Hazard Asset Risk Intelligence</h1><div class="sub">Coastal financial risk &middot; seismic screening &middot; growth and intervention context</div>
 <div class="cards">
 <div class="card"><div class="value">2,022</div><div class="label">assets assessed</div></div>
 <div class="card"><div class="value">$789k</div><div class="label">current-climate EAL</div></div>
 <div class="card"><div class="value">$6.5m</div><div class="label">+1 m SLR EAL</div></div>
 <div class="card"><div class="value">$2.3m</div><div class="label">illustrative annual loss avoided by treatment</div></div>
+<div class="card"><div class="value">400</div><div class="label">liquefaction review flags (1,955 mapped)</div></div>
+<div class="card"><div class="value">35.2%</div><div class="label">Auckland population growth context, 2022&ndash;2052</div></div>
 </div>
 <section><h2>Loss-exceedance comparison</h2><img src="../figures/loss_exceedance_curve.png" alt="Loss exceedance curves"></section>
 <section><h2>Highest-priority assets under +1 m SLR</h2><table><thead><tr><th>Asset</th><th>Type</th><th>Local board</th><th>EAL</th><th>Risk band</th></tr></thead><tbody><tr><td>Central Toilet and Changing Room - Whlm</td><td>Toilet/Changing</td><td>Rodney</td><td>$75k</td><td>Very high</td></tr><tr><td>Changing room area</td><td>Changing Shed</td><td>Franklin</td><td>$61k</td><td>Very high</td></tr><tr><td>Changing Room</td><td>Changing Shed</td><td>Orakei</td><td>$61k</td><td>Very high</td></tr><tr><td>Changing room area</td><td>Changing Shed</td><td>Franklin</td><td>$61k</td><td>Very high</td></tr><tr><td>Changing Room-(huia Domain) Bch Front</td><td>Changing Shed</td><td>Waitakere Ranges</td><td>$61k</td><td>Very high</td></tr><tr><td>Change Room</td><td>Changing Shed</td><td>Mangere-Otahuhu</td><td>$61k</td><td>Very high</td></tr><tr><td>Changing Rooms - Middle Of Domain</td><td>Changing Shed</td><td>Orakei</td><td>$61k</td><td>Very high</td></tr><tr><td>Toilet - W32 (Eric Armishaw Park)</td><td>Public Toilet</td><td>Albert-Eden</td><td>$42k</td><td>Very high</td></tr><tr><td>Toilet - W4 Heritage Toilet/change</td><td>Public Toilet</td><td>Whau</td><td>$42k</td><td>Very high</td></tr><tr><td>Toilet - W3 Novaloo (Bhb Beach)</td><td>Public Toilet</td><td>Whau</td><td>$42k</td><td>Very high</td></tr></tbody></table></section>
-<section><h2>Interpretation</h2><p>The model joins public asset points to four coastal-inundation frequencies, converts exposure to financial loss using explicit vulnerability assumptions, and propagates replacement-value and damage uncertainty through 10,000 Monte Carlo iterations.</p>
-<p class="note"><strong>Important:</strong> Replacement values and damage functions are illustrative portfolio assumptions, not Auckland Council financial data. The output is a transparent analytical prototype, not an engineering, valuation, or investment decision.</p></section>
+<section><h2>Interpretation</h2><p>The model joins public asset points to four coastal-inundation frequencies, converts exposure to financial loss using explicit vulnerability assumptions, and propagates replacement-value and damage uncertainty through 10,000 Monte Carlo iterations. A separate Council liquefaction layer adds non-financial seismic screening, while AGS23v1.1 supplies planning context.</p>
+<p>Under the central demonstration assumptions, the conditional intervention screen has a benefit-cost ratio of 1.65.</p>
+<p class="note"><strong>Important:</strong> Replacement values, damage functions, intervention costs and treatment effects are illustrative assumptions, not Auckland Council financial data or engineering estimates. Liquefaction is a regional vulnerability screen, not property-level earthquake risk. Growth does not multiply loss. This prototype is not an engineering, valuation, insurance, regulatory or investment decision.</p></section>
 </main></body></html>

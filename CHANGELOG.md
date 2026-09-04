@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 — 2026-09-04
+
+- Added Auckland Council liquefaction-vulnerability screening as a separate, non-financial hazard lens.
+- Added AGS23v1.1 household, population and employment projections as service-demand planning context.
+- Added asset and portfolio intervention economics with NPV, BCR, discounted payback and nine sensitivity cases.
+- Expanded the Streamlit app and self-contained offline dashboard with dedicated resilience decision views.
+- Added typed model helpers, SQLite tables, SQL examples, methodology, data dictionary and automated tests for the new evidence layers.
+- Updated public repository documentation with verified outputs and explicit decision-use limitations.
+
 ## 1.2.0 — 2026-08-26
 
 - Upgraded the Streamlit app into a professional four-view decision dashboard.

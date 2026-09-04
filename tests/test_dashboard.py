@@ -8,7 +8,7 @@ def test_dashboard_loads_verified_outputs_without_exceptions():
     dashboard = AppTest.from_file(str(app_path), default_timeout=60).run()
 
     assert not dashboard.exception
-    assert len(dashboard.tabs) == 4
+    assert len(dashboard.tabs) == 5
     metric_labels = {metric.label for metric in dashboard.metric}
     assert {
         "Assets in view",
@@ -17,8 +17,11 @@ def test_dashboard_loads_verified_outputs_without_exceptions():
         "Expected annual loss",
         "Expected event loss",
         "P90 event loss",
+        "Liquefaction coverage",
+        "Damage Possible",
+        "Dual-hazard review",
     }.issubset(metric_labels)
-    assert len(dashboard.dataframe) == 1
+    assert len(dashboard.dataframe) >= 2
     assert len(dashboard.multiselect) == 2
     assert all(widget.value == [] for widget in dashboard.multiselect)
     assert len(dashboard.pills) == 1
@@ -27,6 +30,26 @@ def test_dashboard_loads_verified_outputs_without_exceptions():
     assert dashboard.toggle("filter_exposed").value is False
     assert dashboard.selectbox("filter_scenario").value == "slr_1m"
     assert len(dashboard.download_button) >= 4
+
+
+def test_resilience_lenses_and_liquefaction_map_render_without_exceptions():
+    app_path = Path(__file__).resolve().parents[1] / "app.py"
+    dashboard = AppTest.from_file(str(app_path), default_timeout=60).run()
+
+    dashboard.segmented_control("resilience_lens").set_value("Growth & demand").run()
+    assert not dashboard.exception
+    assert any(metric.label == "Auckland benchmark" for metric in dashboard.metric)
+
+    dashboard.segmented_control("resilience_lens").set_value(
+        "Intervention economics"
+    ).run()
+    assert not dashboard.exception
+    assert any(metric.label == "Illustrative BCR" for metric in dashboard.metric)
+
+    dashboard.segmented_control("map_lens").set_value(
+        "Liquefaction vulnerability"
+    ).run()
+    assert not dashboard.exception
 
 
 def test_dashboard_reset_restores_unfiltered_default_view():

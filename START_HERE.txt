@@ -1,4 +1,4 @@
-AUCKLAND NATURAL HAZARD ASSET LOSS ENGINE
+AUCKLAND NATURAL HAZARD RISK INTELLIGENCE
 =========================================
 
 WINDOWS QUICK START
@@ -20,8 +20,9 @@ FULL MODEL EXECUTION
 
 Double-click scripts\windows\run_pipeline.bat
 
-The first full run downloads Auckland Council public data. The supplied
-verified outputs allow the dashboard to start before rerunning the pipeline.
+The first full run downloads Auckland Council public hazard and asset data.
+The supplied verified outputs allow both dashboards to start before rerunning
+the pipeline, including multi-hazard, growth and intervention-economics views.
 
-Read LAPTOP_SETUP_GUIDE.md for the complete step-by-step process,
-troubleshooting, GitHub instructions and interview explanation.
+Read README.md for setup, model design, verified results and limitations.
+Read docs\METHODOLOGY.md for the full technical explanation.

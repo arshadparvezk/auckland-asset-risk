@@ -52,6 +52,6 @@ exit /b 0
 
 :failed
 echo.
-echo SETUP FAILED. Review the error above and see LAPTOP_SETUP_GUIDE.md.
+echo SETUP FAILED. Review the error above and see README.md.
 pause
 exit /b 1

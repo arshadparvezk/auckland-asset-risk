@@ -9,7 +9,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - run: python scripts/build_static_dashboard.py
       - run: pytest -q
       - run: python -m compileall -q src app.py scripts
-      - run: python scripts/build_static_dashboard.py
-

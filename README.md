@@ -1,5 +1,10 @@
 # Auckland Natural Hazard Risk Intelligence
 
+[![tests](https://github.com/arshadparvezk/auckland-asset-risk/actions/workflows/ci.yml/badge.svg)](https://github.com/arshadparvezk/auckland-asset-risk/actions/workflows/ci.yml)
+[![dashboard deployment](https://github.com/arshadparvezk/auckland-asset-risk/actions/workflows/pages.yml/badge.svg)](https://github.com/arshadparvezk/auckland-asset-risk/actions/workflows/pages.yml)
+
+**[Open the live decision dashboard](https://arshadparvezk.github.io/auckland-asset-risk/)** · [Review the methodology](docs/METHODOLOGY.md) · [Query the SQLite model](sql/portfolio_queries.sql)
+
 A reproducible data-science portfolio project that turns public Auckland hazard and growth data into decision evidence for public assets. Coastal inundation is modelled financially through probabilistic loss and EAL; seismic liquefaction is kept as a separate vulnerability screen; Council growth projections provide service-demand context; and an explicit, cost-sensitive intervention appraisal demonstrates lifecycle economics. It was designed for the **Data Scientist, Asset Financial Risk** vacancy and mirrors the role's core work without presenting illustrative assumptions as Council facts.
 
 The professional Streamlit dashboard includes an executive overview, multi-hazard screening, growth and demand context, interactive intervention economics, two map lenses, a downloadable priority register, uncertainty visualisation, methodology and data-quality controls. The quick start below covers browser-only, Windows one-click and command-line execution.
